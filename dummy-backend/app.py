@@ -11,8 +11,8 @@ def home():
 @app.route('/maps')
 def maps():
     return jsonify({
-        "lat":12.9699,
-        "long":77.700771,
+        "lat":12.969645,
+        "long":77.700679,
         "event_info":{
             "id":1123,
             "name": "ctrl+vibe3.0",

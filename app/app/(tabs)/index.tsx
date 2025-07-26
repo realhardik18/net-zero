@@ -1,6 +1,6 @@
 import * as Location from 'expo-location';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, TouchableOpacity, Alert, ScrollView } from 'react-native';
+import { ActivityIndicator, StyleSheet, Alert, ScrollView } from 'react-native';
 
 import { HelloWave } from '@/components/HelloWave';
 import { ThemedText } from '@/components/ThemedText';
@@ -13,6 +13,7 @@ export default function HomeScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isWithinRadius, setIsWithinRadius] = useState<boolean | null>(null);
   const [currentDistance, setCurrentDistance] = useState<number | null>(null);
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
 
   useEffect(() => {
     let locationSubscription: Location.LocationSubscription | null = null;
@@ -27,11 +28,12 @@ export default function HomeScreen() {
       locationSubscription = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
-          timeInterval: 1000, // Update every second
-          distanceInterval: 0.5, // Update every meter
+          timeInterval: 500,
+          distanceInterval: 0.1,
         },
         (loc) => {
           setLocation(loc);
+          setLastUpdateTime(new Date());
         }
       );
     })();
@@ -62,7 +64,7 @@ export default function HomeScreen() {
   // Function to check if user is within 10m radius
   const checkRadius = (userLat: number, userLon: number, targetLat: number, targetLon: number): boolean => {
     const distance = calculateDistance(userLat, userLon, targetLat, targetLon);
-    return distance <= 10; // 10 meter radius
+    return distance <= 100; // 10 meter radius
   };
 
   const fetchMapData = async () => {
@@ -129,14 +131,17 @@ export default function HomeScreen() {
     }
   }, [location, mapData]);
 
-  // Auto-fetch map data when location is available
+  // Auto-fetch map data when location is available with debouncing
   useEffect(() => {
-    if (location && !mapData && !isLoading) {
-      fetchMapData();
-    }
+    const timer = setTimeout(() => {
+      if (location && !isLoading) {
+        fetchMapData();
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
   }, [location]);
 
-  // Format distance for display
   const formatDistance = (distance: number) => {
     if (distance >= 1000) {
       return `${(distance / 1000).toFixed(2)} km`;
@@ -144,55 +149,114 @@ export default function HomeScreen() {
     return `${distance.toFixed(1)} m`;
   };
 
+  const getLocationStatus = () => {
+    if (!location) return { color: '#6c757d', text: 'Getting location...' };
+    if (lastUpdateTime) {
+      const timeDiff = Date.now() - lastUpdateTime.getTime();
+      if (timeDiff < 2000) return { color: '#28a745', text: 'Live' };
+      if (timeDiff < 10000) return { color: '#ffc107', text: 'Recent' };
+    }
+    return { color: '#dc3545', text: 'Outdated' };
+  };
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <ScrollView 
+      style={styles.container} 
+      contentContainerStyle={styles.contentContainer}
+      showsVerticalScrollIndicator={false}
+    >
       <ThemedView style={styles.titleContainer}>
         <ThemedText type="title">Welcome To net0</ThemedText>
         <HelloWave />
       </ThemedView>
 
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">📍 Your Location</ThemedText>
-        {errorMsg && <ThemedText>{errorMsg}</ThemedText>}
-        {!location && !errorMsg && <ActivityIndicator size="small" />}
+      <ThemedView style={styles.locationCard}>
+        <ThemedView style={styles.locationHeader}>
+          <ThemedText type="subtitle">📍 Your Location</ThemedText>
+          {location && (
+            <ThemedView style={[styles.statusIndicator, { backgroundColor: getLocationStatus().color }]}>
+              <ThemedText style={styles.statusText}>{getLocationStatus().text}</ThemedText>
+            </ThemedView>
+          )}
+        </ThemedView>
+        
+        {errorMsg && <ThemedText style={styles.errorText}>{errorMsg}</ThemedText>}
+        
+        {!location && !errorMsg && (
+          <ThemedView style={styles.loadingLocationContainer}>
+            <ActivityIndicator size="small" color="#0a84ff" />
+            <ThemedText style={styles.loadingText}>Acquiring GPS signal...</ThemedText>
+          </ThemedView>
+        )}
+        
         {location && (
-          <>
-            <ThemedText>Latitude: {location.coords.latitude.toFixed(6)}</ThemedText>
-            <ThemedText>Longitude: {location.coords.longitude.toFixed(6)}</ThemedText>
-          </>
+          <ThemedView>
+            <ThemedView style={styles.coordinatesContainer}>
+              <ThemedText style={styles.coordinateLabel}>Lat:</ThemedText>
+              <ThemedText style={styles.coordinateValue}>{location.coords.latitude.toFixed(6)}</ThemedText>
+            </ThemedView>
+            <ThemedView style={styles.coordinatesContainer}>
+              <ThemedText style={styles.coordinateLabel}>Lng:</ThemedText>
+              <ThemedText style={styles.coordinateValue}>{location.coords.longitude.toFixed(6)}</ThemedText>
+            </ThemedView>
+            <ThemedText style={styles.accuracyText}>
+              Accuracy: ±{location.coords.accuracy?.toFixed(1)}m
+            </ThemedText>
+          </ThemedView>
         )}
       </ThemedView>
 
-      {/* Show event status */}
+      {/* Event Status */}
       {location && (
-        <ThemedView style={styles.stepContainer}>
+        <ThemedView style={styles.eventStatusContainer}>
           {isLoading ? (
-            <ThemedView style={styles.loadingContainer}>
-              <ActivityIndicator size="small" />
-              <ThemedText>Checking for nearby events...</ThemedText>
+            <ThemedView style={styles.loadingEventContainer}>
+              <ActivityIndicator size="large" color="#0a84ff" />
+              <ThemedText style={styles.loadingEventText}>Scanning for events...</ThemedText>
+              <ThemedView style={styles.scanningIndicator}>
+                <ThemedText style={styles.scanningText}>🔍 Analyzing your location</ThemedText>
+              </ThemedView>
             </ThemedView>
           ) : mapData ? (
             <>
               {isWithinRadius && mapData.event_info ? (
-                <ThemedView style={styles.eventContainer}>
-                  <ThemedText type="subtitle">🎉 You're at an Event!</ThemedText>
-                  <ThemedView style={styles.eventDetails}>
-                    <ThemedText style={styles.eventName}>Event: {mapData.event_info.name}</ThemedText>
-                    <ThemedText style={styles.eventId}>ID: {mapData.event_info.id}</ThemedText>
+                <ThemedView style={styles.eventFoundContainer}>
+                  <ThemedView style={styles.eventHeader}>
+                    <ThemedText style={styles.eventFoundTitle}>🎉 Event Detected!</ThemedText>
+                    <ThemedView style={styles.liveIndicator}>
+                      <ThemedText style={styles.liveText}>LIVE</ThemedText>
+                    </ThemedView>
+                  </ThemedView>
+                  
+                  <ThemedView style={styles.eventCard}>
+                    <ThemedText style={styles.eventName}>{mapData.event_info.name}</ThemedText>
+                    <ThemedText style={styles.eventId}>#{mapData.event_info.id}</ThemedText>
                     
-                    <ThemedText style={styles.guestLabel}>Guests:</ThemedText>
-                    {mapData.event_info.guests && mapData.event_info.guests.map((guest: string, index: number) => (
-                      <ThemedText key={index} style={styles.guestName}>• {guest}</ThemedText>
-                    ))}
+                    <ThemedView style={styles.divider} />
+                    
+                    <ThemedText style={styles.guestLabel}>👥 Attendees</ThemedText>
+                    <ThemedView style={styles.guestGrid}>
+                      {mapData.event_info.guests && mapData.event_info.guests.map((guest: string, index: number) => (
+                        <ThemedView key={index} style={styles.guestChip}>
+                          <ThemedText style={styles.guestChipText}>{guest}</ThemedText>
+                        </ThemedView>
+                      ))}
+                    </ThemedView>
                   </ThemedView>
                 </ThemedView>
               ) : (
                 <ThemedView style={styles.noEventContainer}>
-                  <ThemedText style={styles.noEventText}>📍 No events in your area right now</ThemedText>
+                  <ThemedText style={styles.noEventIcon}>📡</ThemedText>
+                  <ThemedText style={styles.noEventTitle}>No Events Nearby</ThemedText>
+                  <ThemedText style={styles.noEventSubtitle}>
+                    Move closer to an event location to join
+                  </ThemedText>
                   {currentDistance !== null && (
-                    <ThemedText style={styles.distanceInfo}>
-                      Nearest event is {formatDistance(currentDistance)} away
-                    </ThemedText>
+                    <ThemedView style={styles.distanceChip}>
+                      <ThemedText style={styles.distanceChipText}>
+                        📍 {formatDistance(currentDistance)} to nearest event
+                      </ThemedText>
+                    </ThemedView>
                   )}
                 </ThemedView>
               )}
@@ -200,13 +264,6 @@ export default function HomeScreen() {
           ) : null}
         </ThemedView>
       )}
-
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          When you're ready, run <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current <ThemedText type="defaultSemiBold">app</ThemedText> to <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
     </ScrollView>
   );
 }
@@ -214,137 +271,222 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#121212',
   },
   contentContainer: {
-    padding: 16,
-    paddingBottom: 32,
+    padding: 20,
+    paddingBottom: 40,
   },
   titleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 50,
+    marginBottom: 30,
+  },
+  locationCard: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  locationHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  statusIndicator: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  errorText: {
+    color: '#ff6b6b',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  loadingLocationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 20,
+  },
+  loadingText: {
+    color: '#888',
+    fontSize: 14,
+  },
+  coordinatesContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  coordinateLabel: {
+    fontWeight: 'bold',
+    color: '#ccc',
+  },
+  coordinateValue: {
+    fontFamily: 'monospace',
+    color: '#0a84ff',
+    fontWeight: '600',
+  },
+  accuracyText: {
+    textAlign: 'center',
+    color: '#888',
+    fontSize: 12,
+    marginTop: 8,
+    fontStyle: 'italic',
+  },
+  eventStatusContainer: {
+    marginBottom: 20,
+  },
+  loadingEventContainer: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 16,
+    padding: 30,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  loadingEventText: {
+    marginTop: 16,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  scanningIndicator: {
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#1a2332',
+    borderRadius: 20,
+  },
+  scanningText: {
+    color: '#4a9eff',
+    fontSize: 14,
+  },
+  eventFoundContainer: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#4caf50',
+  },
+  eventHeader: {
+    backgroundColor: '#2d5a2d',
+    padding: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  eventFoundTitle: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  liveIndicator: {
+    backgroundColor: '#ff4444',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  liveText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  eventCard: {
+    padding: 20,
+  },
+  eventName: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#4caf50',
+    marginBottom: 4,
+  },
+  eventId: {
+    fontSize: 16,
+    color: '#888',
+    marginBottom: 16,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#333',
+    marginVertical: 16,
+  },
+  guestLabel: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#4caf50',
+    marginBottom: 12,
+  },
+  guestGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
-    marginTop: 40,
+  },
+  guestChip: {
+    backgroundColor: '#2d5a2d',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#4caf50',
+  },
+  guestChipText: {
+    color: '#a8e6a8',
+    fontWeight: '600',
+  },
+  noEventContainer: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 16,
+    padding: 30,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  noEventIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  noEventTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  noEventSubtitle: {
+    fontSize: 16,
+    color: '#888',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  distanceChip: {
+    backgroundColor: '#332d1a',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#ffc107',
+  },
+  distanceChipText: {
+    color: '#ffcc02',
+    fontWeight: '600',
   },
   stepContainer: {
     gap: 8,
     marginBottom: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
-  loadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-  },
-  noEventContainer: {
-    backgroundColor: '#fff3cd',
-    padding: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#ffeaa7',
-    alignItems: 'center',
-  },
-  noEventText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#856404',
-    textAlign: 'center',
-  },
-  distanceInfo: {
-    fontSize: 14,
-    color: '#6c757d',
-    marginTop: 4,
-    textAlign: 'center',
-  },
-  distanceDisplay: {
-    backgroundColor: '#f0f8ff',
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: '#b0d4f1',
-    alignItems: 'center',
-  },
-  distanceLabel: {
-    fontWeight: 'bold',
-    marginBottom: 4,
-    fontSize: 14,
-  },
-  distanceValue: {
-    fontSize: 20,
-    color: '#0066cc',
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  distanceSubtext: {
-    fontSize: 12,
-    color: '#666',
-  },
-  radiusContainer: {
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 8,
-  },
-  insideRadius: {
-    backgroundColor: '#d4edda',
-    borderColor: '#c3e6cb',
-    borderWidth: 1,
-  },
-  outsideRadius: {
-    backgroundColor: '#f8d7da',
-    borderColor: '#f5c6cb',
-    borderWidth: 1,
-  },
-  radiusText: {
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  distanceText: {
-    textAlign: 'center',
-    marginTop: 4,
-    fontSize: 12,
-  },
-  eventContainer: {
-    backgroundColor: '#e8f5e8',
-    padding: 16,
-    borderRadius: 10,
-    marginTop: 12,
-    borderWidth: 2,
-    borderColor: '#4caf50',
-  },
-  eventDetails: {
-    marginTop: 8,
-  },
-  eventName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2e7d32',
-    marginBottom: 4,
-  },
-  eventId: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 8,
-  },
-  guestLabel: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 4,
-    color: '#2e7d32',
-  },
-  guestName: {
-    fontSize: 14,
-    marginLeft: 8,
-    marginBottom: 2,
-    color: '#555',
-  },
 });
-
