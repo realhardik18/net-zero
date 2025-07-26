@@ -4,7 +4,7 @@ import { usePathname } from 'next/navigation';
 
 const nav = [
   { name: 'Event',   href: '/dashboard' },
-  { name: 'Profile', href: '/dashboard/profile' },
+  { name: 'Profile', href: '/profile' },
 ];
 
 export default function Sidebar() {
