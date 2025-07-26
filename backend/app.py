@@ -199,3 +199,33 @@ def delete_event(event_id: str, user=Depends(authed)):
         raise HTTPException(403, "Forbidden")
 
     supabase.table("events").delete().eq("id", event_id).execute()
+
+
+# 1. GET /profile/{user_id}
+@app.get("/profile/{user_id}", status_code=200)
+def get_profile_by_id(user_id: str, password: str):
+    """
+    ?password=plain‑text‑password  (simple for hackathon only)
+    """
+    user = supabase.table("users").select("*").eq("id", user_id).single().execute().data
+    if not user or not verify_pw(password, user["password"]):
+        raise HTTPException(401, "Bad credentials")
+    user.pop("password", None)
+    return user
+
+# 2. POST /profile/{user_id}/update
+@app.post("/profile/{user_id}/update", status_code=200)
+def update_profile_by_id(user_id: str, payload: dict = Body(...)):
+    password = payload.pop("password", None)
+    user = supabase.table("users").select("*").eq("id", user_id).single().execute().data
+    if not user or not verify_pw(password, user["password"]):
+        raise HTTPException(401, "Bad credentials")
+
+    allowed = {"name", "x", "github", "linkedin", "avatar_link", "bio"}
+    update_data = {k: v for k, v in payload.items() if k in allowed and v is not None}
+    if not update_data:
+        raise HTTPException(400, "No fields to update")
+
+    supabase.table("users").update(update_data).eq("id", user_id).execute()
+    return {"msg": "Profile updated"}
+
