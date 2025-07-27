@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 import bcrypt
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, status, Body, Form
+import re
+import requests
+import json
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from supabase import create_client, Client
@@ -227,8 +230,14 @@ def get_profile_by_id(user_email: str, password: str):
     return user
 
 # 2. POST /profile/{user_id}/update
+from fastapi import BackgroundTasks
+
 @app.post("/profile/{user_email}/update", status_code=200)
-def update_profile_by_id(user_email: str, payload: dict = Body(...)):
+def update_profile_by_id(
+    user_email: str,
+    payload: dict = Body(...),
+    background_tasks: BackgroundTasks = None
+):
     user = supabase.table("users").select("*").eq("email", user_email).single().execute().data
 
     allowed = {"name", "x", "github", "linkedin", "avatar_link", "bio"}
@@ -236,8 +245,65 @@ def update_profile_by_id(user_email: str, payload: dict = Body(...)):
     if not update_data:
         raise HTTPException(400, "No fields to update")
 
+    # Check if socials changed
+    prev_linkedin = user.get("linkedin")
+    prev_x = user.get("x")
+    new_linkedin = payload.get("linkedin")
+    new_x = payload.get("x")
+    socials_changed = (
+        (prev_linkedin != new_linkedin and new_linkedin) or
+        (prev_x != new_x and new_x)
+    )
+
     supabase.table("users").update(update_data).eq("email", user_email).execute()
-    return {"msg": "Profile updated"}
+
+    tags_info = None
+    if socials_changed and background_tasks:
+        background_tasks.add_task(extract_and_update_tags_task, new_linkedin, new_x, user_email)
+        print("TAGS INFO:", tags_info)
+
+    return {"msg": "Profile updated", "tags": tags_info}
+
+
+def extract_and_update_tags_task(linkedin, x, email):
+    n8n_URL = "https://tanishnioo.app.n8n.cloud/webhook/e9c6794a-c8e7-4709-9c9c-35efac1c5040"
+    try:
+        def full_linkedin_url(handle):
+            return f"https://linkedin.com/in/{handle}/" if handle else None
+        def full_x_url(handle):
+            return f"https://x.com/{handle}/" if handle else None
+        linkedin_url = full_linkedin_url(linkedin)
+        x_url = full_x_url(x)
+        print("Calling n8n with:", linkedin_url, x_url)
+
+        n8n_res = requests.post(
+            n8n_URL,
+            json={"linkedin": linkedin_url, "x": x_url},
+            timeout=60
+        )
+        print("n8n status:", n8n_res.status_code)
+        n8n_res.raise_for_status()
+        tags_response = n8n_res.json()
+        print("n8n response:", tags_response)
+
+        if not tags_response or not tags_response[0].get("output"):
+            print("n8n returned no output:", tags_response)
+            return {"error": "No tags received from n8n", "raw": tags_response}
+        
+        raw = tags_response[0]["output"]
+        # Remove ```json ... ``` and trim whitespace
+        json_str = re.sub(r"^```json|^```|```$", "", raw, flags=re.MULTILINE).strip()
+        tags_obj = json.loads(json_str)
+        tags_flat = []
+        for v in tags_obj.values():
+            tags_flat.extend(v)
+        print("Saving tags:", tags_flat)
+        supabase.table("users").update({"tags": tags_flat}).eq("email", email).execute()
+        return {"tags": tags_obj, "flat_tags": tags_flat}
+    except Exception as e:
+        print("Tag extraction error:", str(e))
+        return {"error": str(e)}
+
 
 @app.post("/events/{event_id}/join", status_code=201)
 def join_event(event_id: str, user=Depends(authed)):
@@ -372,3 +438,51 @@ def delete_event(event_id: str, user=Depends(authed)):
     if ev["host_id"] != user["id"]:
         raise HTTPException(403, "Forbidden")
     supabase.table("events").delete().eq("id", event_id).execute()
+
+n8n_URL = "https://tanishnioo.app.n8n.cloud/webhook/e9c6794a-c8e7-4709-9c9c-35efac1c5040"
+
+@app.post("/extract-tags", status_code=200)
+def extract_tags(payload: dict = Body(...)):
+    linkedin = payload.get("linkedin")
+    x = payload.get("x")
+    email = payload.get("email")
+
+    if not email or (not linkedin and not x):
+        return {"error": "email and at least one social handle required"}
+
+    # Call n8n webhook
+    try:
+        n8n_res = requests.post(
+            n8n_URL,
+            json={"linkedin": linkedin, "x": x},
+            timeout=60
+        )
+        n8n_res.raise_for_status()
+        # n8n must return JSON array as shown in your sample
+        tags_response = n8n_res.json()
+    except Exception as e:
+        return {"error": f"Failed to fetch tags from n8n: {e}"}
+
+    # Extract, flatten, and save tags
+    # tags_response = [{"output": "...json string..."}]
+    if not tags_response or not tags_response[0].get("output"):
+        return {"error": "No tags received from n8n"}
+
+    try:
+        tags_json_str = tags_response[0]["output"].replace("json", "").strip()
+        tags_obj = json.loads(tags_json_str)
+    except Exception as e:
+        return {"error": f"Could not parse tags: {e}"}
+
+    # Flatten tags for storage in text[]
+    tags_flat = []
+    for v in tags_obj.values():
+        tags_flat.extend(v)
+
+    # Save to Supabase users table
+    supabase.table("users").update({"tags": tags_flat}).eq("email", email).execute()
+
+    return {
+        "tags": tags_obj,
+        "flat_tags": tags_flat
+    }
