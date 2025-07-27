@@ -356,3 +356,19 @@ def scrape_luma_event(event_url: str):
         return event_data
     except Exception as e:
         raise HTTPException(500, f"Failed to scrape event: {str(e)}")
+    
+@app.delete("/events/{event_id}", status_code=204)
+def delete_event(event_id: str, user=Depends(authed)):
+    ev = (
+        supabase.table("events")
+        .select("*")
+        .eq("id", event_id)
+        .single()
+        .execute()
+        .data
+    )
+    if not ev:
+        raise HTTPException(404, "Not found")
+    if ev["host_id"] != user["id"]:
+        raise HTTPException(403, "Forbidden")
+    supabase.table("events").delete().eq("id", event_id).execute()

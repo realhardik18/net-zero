@@ -1,36 +1,80 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-'use client';
+"use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Calendar, MapPin, Users, Plus, MoreHorizontal, Edit3, Trash2, Eye } from "lucide-react"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import dynamic from "next/dynamic";
+import {
+  ArrowLeft,
+  Calendar,
+  MapPin,
+  Users,
+  Plus,
+  MoreHorizontal,
+  Edit3,
+  Trash2,
+  Eye,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
+  Sparkles,
+  Target,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
+/* ─────────────  CONSTANTS  ───────────── */
 const API = "http://localhost:8000";
 
+/* ─────────────  COMPONENT ───────────── */
 export default function HostDashboard() {
   const router = useRouter();
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
 
-  function useReverseGeocode(lat: number, lon: number) {
+  const opencageKey = "60b3fcf5da8b4c0bb376bb882021a9ab"; // Replace with your actual key
+
+  // Simple in-memory cache
+  const geocodeCache: Record<string, string> = {};
+
+  function useOpenCageGeocode(lat: number, lon: number) {
     const [address, setAddress] = useState<string | null>(null);
-  
     useEffect(() => {
-      if (!lat || !lon) return;
-      setAddress(null);
-      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`)
-        .then((r) => r.json())
-        .then((data) => setAddress(data.display_name || null))
-        .catch(() => setAddress(null));
+      if (typeof lat !== "number" || typeof lon !== "number") return;
+      const key = `${lat},${lon}`;
+      if (geocodeCache[key]) {
+        setAddress(geocodeCache[key]);
+        return;
+      }
+      let cancelled = false;
+      async function fetchGeocode() {
+        try {
+          const resp = await fetch(
+            `https://api.opencagedata.com/geocode/v1/json?q=${lat}+${lon}&key=${opencageKey}`
+          );
+          const data = await resp.json();
+          const result = data.results?.[0]?.formatted || "";
+          const trimmed = result.length > 60 ? result.slice(0, 60) + "..." : result;
+          geocodeCache[key] = trimmed;
+          if (!cancelled) setAddress(trimmed);
+        } catch {
+          if (!cancelled) setAddress(null);
+        }
+      }
+      fetchGeocode();
+      return () => {
+        cancelled = true;
+      };
     }, [lat, lon]);
-  
     return address;
   }
 
@@ -55,27 +99,30 @@ export default function HostDashboard() {
     try {
       const res = await fetch(`${API}/events/${eventId}/members`, {
         headers: {
-          Authorization: `Basic ${btoa(`${creds.email}:${creds.password}`)}`
-        }
+          Authorization: `Basic ${btoa(`${creds.email}:${creds.password}`)}`,
+        },
       });
       if (!res.ok) throw new Error("Failed to fetch members");
       const data = await res.json();
-      setMembers(prev => ({ ...prev, [eventId]: data.members || [] }));
+      setMembers((prev) => ({ ...prev, [eventId]: data.members || [] }));
     } catch {
-      setMembers(prev => ({ ...prev, [eventId]: [] }));
+      setMembers((prev) => ({ ...prev, [eventId]: [] }));
     }
     setLoadingMembers(null);
   };
 
   function GeocodeSpan({ lat, lon }: { lat: number; lon: number }) {
-    const address = useReverseGeocode(lat, lon);
-    if (address) return <span>{address}</span>;
+    const address = useOpenCageGeocode(lat, lon);
+    if (address)
+      return <span title={address}>{address}</span>;
     return (
       <span>
-        {lat.toFixed(2)}, {lon.toFixed(2)} (resolving…)
+        {lat.toFixed(2)}, {lon.toFixed(2)}{" "}
+        <span className="italic text-zinc-400">(resolving…)</span>
       </span>
     );
-  }  
+  }
+
   useEffect(() => {
     const raw = localStorage.getItem("netzero_creds");
     if (!raw) {
@@ -85,127 +132,169 @@ export default function HostDashboard() {
     const creds = JSON.parse(raw);
     fetch(`${API}/my-events`, {
       headers: {
-        Authorization: `Basic ${btoa(`${creds.email}:${creds.password}`)}`
-      }
+        Authorization: `Basic ${btoa(`${creds.email}:${creds.password}`)}`,
+      },
     })
-      .then(res => {
+      .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch events");
         return res.json();
       })
-      .then(data => {
+      .then((data) => {
         setEvents(data.hosted || []);
       })
-      .catch(e => {
+      .catch(() => {
         setMsg("Error loading events");
       })
       .finally(() => setLoading(false));
   }, [router]);
 
   return (
-    <div className="min-h-screen relative overflow-x-hidden font-sans"
-    style={{
-      background: "radial-gradient(ellipse at 60% 20%, #20134e 0%, #100924 60%, #080017 100%)",
-      color: "#fff",
-    }}>
-    {/* STARFIELD */}
-    <div
-      aria-hidden
-      className="fixed inset-0 z-0 pointer-events-none"
-      style={{
-        background:
-          "repeating-radial-gradient(circle at 20% 30%, rgba(255,255,255,0.10) 1px, transparent 1.5px, transparent 100px), " +
-          "repeating-radial-gradient(circle at 80% 70%, rgba(255,255,255,0.13) 0.5px, transparent 1.5px, transparent 100px), " +
-          "repeating-radial-gradient(circle at 40% 85%, rgba(255,255,255,0.08) 1px, transparent 1.8px, transparent 80px)",
-        backgroundSize: "cover",
-        opacity: 0.6,
-        filter: "blur(0.5px)",
-      }}
-    />
-    <div className="min-h-screen bg-black text-white">
-      {/* ...header... */}
-      <header className="border-b border-purple-900/50 bg-black/40 backdrop-blur-md z-10 relative">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-gray-950 to-black text-white relative overflow-hidden">
+      {/* Feedback/messages */}
+      {msg && (
+        <div
+          className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] rounded-lg px-6 py-3 ${
+            msg ? "bg-red-600" : "bg-green-600"
+          }`}
+        >
+          {msg}
+        </div>
+      )}
+
+      {/* Animated background elements */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl animate-pulse"></div>
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/5 rounded-full blur-3xl animate-pulse delay-1000"></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-gradient-radial from-white/[0.02] to-transparent rounded-full"></div>
+      </div>
+
+      {/* Header */}
+      <header className="border-b border-white/10 backdrop-blur-xl bg-black/20 sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <button
-            onClick={() => router.push("/")}
-            className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-purple-400 via-fuchsia-400 to-blue-400 text-transparent bg-clip-text border-none cursor-pointer p-0 hover:opacity-80 transition"
-            style={{ background: "none" }}
-          >Net zero</button>
           <div className="flex items-center gap-4">
-            <Avatar>
+            <Button
+              onClick={() => router.push("/")}
+              variant="ghost"
+              size="icon"
+              className="text-white hover:bg-white/10 border border-white/20 hover:border-white/30 transition-all duration-300 hover:scale-105"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div className="text-2xl font-bold text-white flex items-center gap-2">
+              <Sparkles className="h-6 w-6 text-blue-400" />
+              Net 0
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <Avatar className="ring-2 ring-white/20 hover:ring-white/40 transition-all duration-300">
               <AvatarImage src="/placeholder-user.jpg" />
-              <AvatarFallback>JD</AvatarFallback>
+              <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white font-semibold">
+                JD
+              </AvatarFallback>
             </Avatar>
           </div>
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
-          <div>
-            <h1 className="text-3xl font-bold mb-2">Your Events</h1>
-            <p className="text-zinc-400">Manage and track your hosted events</p>
+      <div className="relative container mx-auto px-4 py-8 max-w-7xl">
+        {/* Page Header */}
+        <div className="mb-12 text-center">
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-full mb-6 backdrop-blur-sm">
+            <Target className="h-4 w-4 text-blue-400" />
+            <span className="text-sm text-gray-300">Host Dashboard</span>
           </div>
+          <h1 className="text-6xl md:text-7xl font-bold mb-6 text-white leading-tight">
+            Manage
+            <span className="ml-4 bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+              Your Events
+            </span>
+          </h1>
+          <p className="text-gray-300 text-xl max-w-2xl mx-auto leading-relaxed">
+            See, track, and manage your hosted events and attendees.
+          </p>
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-10 gap-4">
+          <div className="flex-1" />
           <div className="flex gap-2">
-            <Button onClick={() => router.refresh()} className="bg-white text-black hover:bg-zinc-200">
-              <RefreshCw className="h-4 w-4" />
-              Refresh stats
+            <Button
+              onClick={() => router.refresh()}
+              className="h-12 border-white/30 text-white hover:bg-white/10 bg-transparent transition-all duration-300 text-lg font-medium hover:border-white/50 hover:scale-[1.02] transform"
+            >
+              <RefreshCw className="h-5 w-5 mr-2" />
+              Refresh
             </Button>
-            <Button onClick={() => router.push("/create-event")} className="bg-white text-black hover:bg-zinc-200">
-              <Plus className="h-4 w-4" />
+            <Button
+              onClick={() => router.push("/create-event")}
+              className="h-12 bg-gradient-to-r from-blue-500 via-purple-600 to-pink-600 text-white hover:from-blue-600 hover:via-purple-700 hover:to-pink-700 font-semibold transition-all duration-300 transform hover:scale-[1.02] text-lg shadow-2xl"
+            >
+              <Plus className="h-5 w-5 mr-2" />
               Create Event
             </Button>
           </div>
         </div>
 
-        {/* Feedback/messages */}
-        {msg && <div className="mb-4 text-red-400">{msg}</div>}
-
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 z-10 relative">
-          <Card className="bg-gradient-to-br from-purple-900/40 via-purple-950/70 to-black/70 border-purple-800/60 shadow-lg backdrop-blur-xl">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-14 z-10 relative">
+          <Card className="bg-black/20 border-white/10 backdrop-blur-xl shadow-2xl hover:shadow-3xl transition-all duration-500">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-purple-200">Total Events</CardTitle>
-              <div className="text-3xl font-bold text-purple-300 drop-shadow-glow">{events.length}</div>
+              <CardTitle className="text-sm font-medium text-blue-300">
+                Total Events
+              </CardTitle>
+              <div className="text-4xl font-bold text-blue-400">{events.length}</div>
             </CardHeader>
           </Card>
-          <Card className="bg-gradient-to-br from-fuchsia-800/30 via-indigo-900/60 to-black/80 border-fuchsia-900/50 shadow-lg backdrop-blur-xl">
+          <Card className="bg-black/20 border-white/10 backdrop-blur-xl shadow-2xl hover:shadow-3xl transition-all duration-500">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-fuchsia-200">Total Attendees</CardTitle>
-              <div className="text-3xl font-bold text-fuchsia-200 drop-shadow-glow">
+              <CardTitle className="text-sm font-medium text-purple-300">
+                Total Attendees
+              </CardTitle>
+              <div className="text-4xl font-bold text-purple-400">
                 {events.reduce((sum, ev) => sum + (ev.attendees_count || 0), 0)}
               </div>
             </CardHeader>
           </Card>
-          <Card className="bg-gradient-to-br from-blue-900/40 via-blue-950/70 to-black/70 border-blue-900/60 shadow-lg backdrop-blur-xl">
+          <Card className="bg-black/20 border-white/10 backdrop-blur-xl shadow-2xl hover:shadow-3xl transition-all duration-500">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-blue-200">Active Events</CardTitle>
-              <div className="text-3xl font-bold text-blue-200 drop-shadow-glow">
-                {events.filter(ev => !ev.ended).length}
+              <CardTitle className="text-sm font-medium text-pink-300">
+                Active Events
+              </CardTitle>
+              <div className="text-4xl font-bold text-pink-400">
+                {events.filter((ev) => !ev.ended).length}
               </div>
             </CardHeader>
           </Card>
         </div>
 
-
         {/* Events List */}
-        <div className="space-y-4">
+        <div className="space-y-6">
           {loading ? (
-            <div>Loading events...</div>
+            <div className="text-lg text-gray-400">Loading events…</div>
           ) : events.length === 0 ? (
-            <div className="text-zinc-500">No hosted events found. Create one!</div>
+            <div className="text-zinc-500 text-center">
+              No hosted events found. Create one!
+            </div>
           ) : (
             events.map((event) => (
-              <Card key={event.id} className="bg-gradient-to-br from-purple-900/30 via-black/70 to-black/80 border-purple-900/60 shadow-xl hover:shadow-2xl transition-all duration-300 backdrop-blur-xl">
-                <CardContent className="p-6">
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <Card
+                key={event.id}
+                className="bg-black/20 border-white/10 backdrop-blur-xl shadow-2xl hover:shadow-3xl transition-all duration-500"
+              >
+                <CardContent className="p-8">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
                     <div className="flex-1">
                       <div className="flex items-start justify-between mb-3">
                         <div>
-                          <h3 className="text-xl text-white/90 font-semibold mb-2">{event.name}</h3>
+                          <h3 className="text-2xl text-white font-semibold mb-2">{event.name}</h3>
                           <div className="flex flex-wrap gap-2 mb-3">
                             <Badge
                               variant={event.status === "active" ? "default" : "secondary"}
-                              className={event.status === "Active" ? "bg-zinc-600" : "bg-green-500 "}
+                              className={
+                                event.status === "Active"
+                                  ? "bg-zinc-600"
+                                  : "bg-green-500"
+                              }
                             >
                               {event.status || "Active"}
                             </Badge>
@@ -231,76 +320,115 @@ export default function HostDashboard() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent className="bg-zinc-900 border-zinc-700">
-                              <DropdownMenuItem className="text-zinc-300">
-                                <Eye className="h-4 w-4 mr-2" />
-                                View Details
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="text-zinc-300">
-                                <Edit3 className="h-4 w-4 mr-2" />
-                                Edit Event
-                              </DropdownMenuItem>
-                              <DropdownMenuItem className="text-red-400">
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete Event
-                              </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-red-400"
+                              onClick={async () => {
+                                // Confirm action
+                                if (!window.confirm("Delete this event? This cannot be undone.")) return;
+
+                                // Grab user credentials from localStorage (same as in useEffect)
+                                const raw = localStorage.getItem("netzero_creds");
+                                if (!raw) {
+                                  alert("Not logged in");
+                                  router.replace("/auth");
+                                  return;
+                                }
+                                const creds = JSON.parse(raw);
+
+                                // Optimistic UI: Set loading state or disable UI if needed
+                                setMsg(null);
+
+                                try {
+                                  const resp = await fetch(`${API}/events/${event.id}`, {
+                                    method: "DELETE",
+                                    headers: {
+                                      Authorization: `Basic ${btoa(`${creds.email}:${creds.password}`)}`,
+                                    },
+                                  });
+                                  if (!resp.ok) {
+                                    const err = await resp.json().catch(() => ({}));
+                                    throw new Error(err.detail || "Failed to delete event");
+                                  }
+                                  // Remove from UI
+                                  setEvents((evs) => evs.filter((ev) => ev.id !== event.id));
+                                  setMsg("Event deleted");
+                                  setTimeout(() => setMsg(null), 1500);
+                                } catch (err: any) {
+                                  setMsg(err.message || "Delete failed");
+                                  setTimeout(() => setMsg(null), 2000);
+                                }
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete Event
+                            </DropdownMenuItem>
+
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm text-zinc-400">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-md text-gray-300">
                         <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4" />
+                          <Calendar className="h-5 w-5" />
                           <span>
                             {new Date(event.start_time).toLocaleDateString()} at{" "}
-                            {new Date(event.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            {new Date(event.start_time).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <MapPin className="h-4 w-4" />
+                          <MapPin className="h-5 w-5" />
                           {event.locations?.latitude && event.locations?.longitude ? (
-                            <GeocodeSpan lat={event.locations.latitude} lon={event.locations.longitude} />
+                            <GeocodeSpan
+                              lat={event.locations.latitude}
+                              lon={event.locations.longitude}
+                            />
                           ) : (
                             <span>Location not found</span>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
-                          <Users className="h-4 w-4" />
-                          <span>
-                            {event.attendees_count ?? 0} attendees
-                          </span>
+                          <Users className="h-5 w-5" />
+                          <span>{event.attendees_count ?? 0} attendees</span>
                         </div>
                       </div>
                     </div>
                   </div>
                   {/* Expandable Members */}
                   {expandedEvent === event.id && (
-                    <div className="mt-6 border-t border-fuchsia-800/50 pt-4 bg-black rounded-xl backdrop-blur-sm">
+                    <div className="mt-8 border-t border-purple-900/40 pt-4 bg-black/40 rounded-xl backdrop-blur-sm animate-in slide-in-from-bottom-2">
                       <h4 className="text-lg font-bold mb-2 pl-4 text-white/90">Members</h4>
                       {loadingMembers === event.id ? (
                         <div>Loading members…</div>
-                      ) : (members[event.id]?.length ? (
+                      ) : members[event.id]?.length ? (
                         <ul className="space-y-4">
                           {members[event.id].map((m: any) => {
                             const u = m.users || {};
                             return (
                               <li
                                 key={m.member_id}
-                                className="flex flex-col sm:flex-row gap-4 items-start sm:items-center bg-black rounded-xl p-4 shadow"
+                                className="flex flex-col sm:flex-row gap-4 items-start sm:items-center bg-black/30 rounded-xl p-4 shadow"
                               >
                                 <div className="flex items-center gap-3">
-                                  <Avatar className="w-12 h-12">
+                                  <Avatar className="w-12 h-12 ring-2 ring-white/20">
                                     {u.avatar_link ? (
                                       <AvatarImage src={u.avatar_link} />
                                     ) : (
-                                      <AvatarFallback>{u.name?.charAt(0) ?? "?"}</AvatarFallback>
+                                      <AvatarFallback>
+                                        {u.name?.charAt(0) ?? "?"}
+                                      </AvatarFallback>
                                     )}
                                   </Avatar>
                                   <div>
-                                    <div className="font-bold text-purple-200 text-lg">{u.name}</div>
-                                    <div className="text-xs text-zinc-400">{u.email}</div>
+                                    <div className="font-bold text-blue-200 text-lg">{u.name}</div>
+                                    <div className="text-xs text-gray-400">{u.email}</div>
                                     {u.bio && (
-                                      <div className="mt-1 text-sm text-fuchsia-300 line-clamp-2">{u.bio}</div>
+                                      <div className="mt-1 text-sm text-purple-300 line-clamp-2">
+                                        {u.bio}
+                                      </div>
                                     )}
                                   </div>
                                 </div>
@@ -341,8 +469,8 @@ export default function HostDashboard() {
                           })}
                         </ul>
                       ) : (
-                        <div className="text-zinc-400">No members found.</div>
-                      ))}
+                        <div className="text-gray-400">No members found.</div>
+                      )}
                     </div>
                   )}
                 </CardContent>
@@ -351,7 +479,6 @@ export default function HostDashboard() {
           )}
         </div>
       </div>
-    </div>
     </div>
   );
 }
