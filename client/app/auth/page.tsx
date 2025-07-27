@@ -53,6 +53,7 @@ export default function AuthPage() {
 
       // On success: redirect to dashboard (login) or login (signup)
       if (mode === "login") {
+        localStorage.setItem("netzero_creds", JSON.stringify({ email: form.email, password: form.password }));
         router.push("/dashboard");
       } else {
         router.push("/login");

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 import bcrypt
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, HTTPException, status, Body
+from fastapi import FastAPI, Depends, HTTPException, status, Body, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from supabase import create_client, Client
@@ -114,21 +114,25 @@ def login(payload: dict = Body(...)):
 # ───────────────────────────────
 @app.post("/locations", status_code=201)
 def create_location(
-    latitude: float,
-    longitude: float,
+    latitude: float = Form(...),
+    longitude: float = Form(...),
 ):
-    loc = (
-        supabase.table("locations")
-        .insert(
-            {
-                "latitude": latitude,
-                "longitude": longitude,
-            }
+    try:
+        loc = (
+            supabase.table("locations")
+            .insert(
+                {
+                    "latitude": latitude,
+                    "longitude": longitude,
+                }
+            )
+            .execute()
+            .data[0]
         )
-        .execute()
-        .data[0]
-    )
-    return loc
+        return loc
+    except Exception as e:
+        print(f"Error creating location: {e}")
+        raise HTTPException(500, "Failed to create location")
 
 
 @app.get("/locations")
@@ -140,25 +144,34 @@ def list_locations():
 # ───────────────────────────────
 @app.post("/events", status_code=201)
 def create_event(
-    name: str,
-    start_time: datetime,
-    duration_minutes: int,
-    location_id: str,  # UUID as string
+    name: str = Form(...),
+    start_time: str = Form(...),  # Changed to str and will parse manually
+    duration_minutes: int = Form(...),
+    location_id: str = Form(...),  # UUID as string
     user=Depends(authed),
 ):
     if duration_minutes <= 0:
         raise HTTPException(422, "duration_minutes must be > 0")
 
+    # Parse the datetime string
+    try:
+        parsed_start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+    except ValueError:
+        raise HTTPException(422, "Invalid datetime format")
+
     # confirm location exists (cheap guard)
-    loc = (
-        supabase.table("locations")
-        .select("id")
-        .eq("id", location_id)
-        .single()
-        .execute()
-        .data
-    )
-    if not loc:
+    try:
+        loc = (
+            supabase.table("locations")
+            .select("id")
+            .eq("id", location_id)
+            .single()
+            .execute()
+            .data
+        )
+        if not loc:
+            raise HTTPException(404, "Location not found")
+    except Exception:
         raise HTTPException(404, "Location not found")
 
     ev = (
@@ -167,7 +180,7 @@ def create_event(
             {
                 "host_id": user["id"],
                 "name": name,
-                "start_time": start_time.isoformat(),
+                "start_time": parsed_start_time.isoformat(),
                 "duration_minutes": duration_minutes,
                 "location_id": location_id,
             }
@@ -176,7 +189,6 @@ def create_event(
         .data[0]
     )
     return ev
-
 
 @app.get("/events")
 def list_events():
@@ -199,3 +211,125 @@ def delete_event(event_id: str, user=Depends(authed)):
         raise HTTPException(403, "Forbidden")
 
     supabase.table("events").delete().eq("id", event_id).execute()
+
+
+# 1. GET /profile/{user_id}
+@app.get("/profile/{user_email}", status_code=200)
+def get_profile_by_id(user_email: str, password: str):
+    """
+    ?password=plain‑text‑password  (simple for hackathon only)
+    """
+    user = supabase.table("users").select("*").eq("email", user_email).single().execute().data
+    if not user or not verify_pw(password, user["password"]):
+        raise HTTPException(401, "Bad credentials")
+    user.pop("password", None)
+    return user
+
+# 2. POST /profile/{user_id}/update
+@app.post("/profile/{user_email}/update", status_code=200)
+def update_profile_by_id(user_email: str, payload: dict = Body(...)):
+    user = supabase.table("users").select("*").eq("email", user_email).single().execute().data
+
+    allowed = {"name", "x", "github", "linkedin", "avatar_link", "bio"}
+    update_data = {k: v for k, v in payload.items() if k in allowed and v is not None}
+    if not update_data:
+        raise HTTPException(400, "No fields to update")
+
+    supabase.table("users").update(update_data).eq("email", user_email).execute()
+    return {"msg": "Profile updated"}
+
+@app.post("/events/{event_id}/join", status_code=201)
+def join_event(event_id: str, user=Depends(authed)):
+    # Check if event exists
+    ev = (
+        supabase.table("events")
+        .select("*")
+        .eq("id", event_id)
+        .single()
+        .execute()
+        .data
+    )
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    
+    # Check if already a member
+    existing = (
+        supabase.table("event_members")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("member_id", user["id"])
+        .execute()
+        .data
+    )
+    if existing:
+        raise HTTPException(409, "Already a member")
+    
+    member = (
+        supabase.table("event_members")
+        .insert({
+            "event_id": event_id,
+            "member_id": user["id"]
+        })
+        .execute()
+        .data[0]
+    )
+    return member
+
+@app.delete("/events/{event_id}/leave", status_code=204)
+def leave_event(event_id: str, user=Depends(authed)):
+    supabase.table("event_members").delete().eq("event_id", event_id).eq("member_id", user["id"]).execute()
+
+@app.get("/events/{event_id}/members")
+def get_event_members(event_id: str, user=Depends(authed)):
+    # Get event details with location
+    event = (
+        supabase.table("events")
+        .select("*, locations(*)")
+        .eq("id", event_id)
+        .single()
+        .execute()
+        .data
+    )
+    if not event:
+        raise HTTPException(404, "Event not found")
+    
+    # Get members
+    members = (
+        supabase.table("event_members")
+        .select("*, users(id, name, email, avatar_link)")
+        .eq("event_id", event_id)
+        .execute()
+        .data
+    )
+    
+    return {
+        "event": event,
+        "members": members
+    }
+
+@app.get("/my-events")
+def get_my_events(user=Depends(authed)):
+    """Get events where user is host or member"""
+    # Events where user is host
+    hosted = (
+        supabase.table("events")
+        .select("*, locations(*)")
+        .eq("host_id", user["id"])
+        .execute()
+        .data
+    )
+    
+    # Events where user is member
+    memberships = (
+        supabase.table("event_members")
+        .select("*, events(*, locations(*))")
+        .eq("member_id", user["id"])
+        .execute()
+        .data
+    )
+    member_events = [m["events"] for m in memberships]
+    
+    return {
+        "hosted": hosted,
+        "member_of": member_events
+    }
