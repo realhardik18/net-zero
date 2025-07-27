@@ -169,6 +169,9 @@ export default function CreateEvent() {
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button
+              onClick={() => router.push(
+              '/host-dashboard'
+              )}
               variant="ghost"
               size="icon"
               className="text-white hover:bg-white/10 border border-white/20 hover:border-white/30 transition-all duration-300 hover:scale-105"

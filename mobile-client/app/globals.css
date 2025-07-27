@@ -120,3 +120,8 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* in your globals.css */
+.drop-shadow-glow {
+  filter: drop-shadow(0 0 4px #a883ff) drop-shadow(0 0 10px #6d39ce33);
+}

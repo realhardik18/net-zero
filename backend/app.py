@@ -296,7 +296,7 @@ def get_event_members(event_id: str, user=Depends(authed)):
     # Get members
     members = (
         supabase.table("event_members")
-        .select("*, users(id, name, email, avatar_link)")
+        .select("*, users(id, name, email, bio, linkedin, x, github, avatar_link)")
         .eq("event_id", event_id)
         .execute()
         .data
@@ -318,7 +318,16 @@ def get_my_events(user=Depends(authed)):
         .execute()
         .data
     )
-    
+    # Add attendees_count to each event
+    for ev in hosted:
+        ev['attendees_count'] = (
+            supabase.table("event_members")
+            .select("count", count="exact")
+            .eq("event_id", ev["id"])
+            .execute()
+            .count or 0
+        )
+
     # Events where user is member
     memberships = (
         supabase.table("event_members")
@@ -328,7 +337,7 @@ def get_my_events(user=Depends(authed)):
         .data
     )
     member_events = [m["events"] for m in memberships]
-    
+
     return {
         "hosted": hosted,
         "member_of": member_events
