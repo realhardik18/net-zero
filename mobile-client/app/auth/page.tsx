@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 export default function AuthPage() {
@@ -11,7 +11,15 @@ export default function AuthPage() {
     password: "",
   });
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const creds = localStorage.getItem("auth");
+    if (creds) {
+      router.replace("/host-dashboard");
+    }
+  }, []);
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -20,6 +28,7 @@ export default function AuthPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    setSuccess("");
     setLoading(true);
 
     if (mode === "signup" && !form.name) {
@@ -51,12 +60,16 @@ export default function AuthPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || data.msg || "Auth failed");
 
-      // On success: redirect to dashboard (login) or login (signup)
+      // On success: redirect to dashboard (login) or switch to login mode (signup)
       if (mode === "login") {
-        localStorage.setItem("netzero_creds", JSON.stringify({ email: form.email, password: form.password }));
+        localStorage.setItem("auth", JSON.stringify({ email: form.email, password: form.password }));
         router.push("/host-dashboard");
       } else {
-        router.push("/login");
+        // After successful signup, switch to login mode with success message
+        setMode("login");
+        setError("");
+        setSuccess("Account created successfully! Please log in.");
+        setForm({ name: "", email: form.email, password: "" });
       }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
@@ -71,7 +84,11 @@ export default function AuthPage() {
       <div className="w-full max-w-md bg-black/80 shadow-2xl rounded-2xl px-8 py-10 border border-gray-800 backdrop-blur-md">
         <div className="flex mb-8 justify-center gap-2">
           <button
-            onClick={() => setMode("login")}
+            onClick={() => {
+              setMode("login");
+              setError("");
+              setSuccess("");
+            }}
             className={`px-5 py-2 rounded-t-lg text-lg font-semibold transition ${
               mode === "login"
                 ? "text-[#A02DED] border-b-2 border-[#A02DED]"
@@ -83,7 +100,11 @@ export default function AuthPage() {
             Login
           </button>
           <button
-            onClick={() => setMode("signup")}
+            onClick={() => {
+              setMode("signup");
+              setError("");
+              setSuccess("");
+            }}
             className={`px-5 py-2 rounded-t-lg text-lg font-semibold transition ${
               mode === "signup"
                 ? "text-[#A02DED] border-b-2 border-[#A02DED]"
@@ -130,6 +151,11 @@ export default function AuthPage() {
           {error && (
             <div className="text-pink-500 text-sm text-center font-semibold">
               {error}
+            </div>
+          )}
+          {success && (
+            <div className="text-green-500 text-sm text-center font-semibold">
+              {success}
             </div>
           )}
           <button

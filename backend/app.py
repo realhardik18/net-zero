@@ -7,6 +7,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, Body, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from supabase import create_client, Client
+from scraper import scrape_webpage
 
 # ───────────────────────────────
 # Environment & Supabase client
@@ -333,3 +334,16 @@ def get_my_events(user=Depends(authed)):
         "hosted": hosted,
         "member_of": member_events
     }
+
+@app.get("/scrape-luma")
+def scrape_luma_event(event_url: str):
+    """Scrape a Luma event URL and return event data"""
+    # Add https:// if not present
+    if not event_url.startswith(('http://', 'https://')):
+        event_url = 'https://' + event_url
+    
+    try:
+        event_data = scrape_webpage(event_url)
+        return event_data
+    except Exception as e:
+        raise HTTPException(500, f"Failed to scrape event: {str(e)}")
