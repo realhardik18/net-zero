@@ -42,8 +42,8 @@ export default function UserMapPage() {
 
   // Event location (random coordinates in SF area)
   const eventLocation = {
-    lat: 37.7749 + (Math.random() - 0.5) * 0.01, // Random location near SF
-    lng: -122.4194 + (Math.random() - 0.5) * 0.01
+    lat: 37.7749,
+    lng: -122.4194
   }
 
   const event = {
