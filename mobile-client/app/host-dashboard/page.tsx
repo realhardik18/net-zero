@@ -1,11 +1,14 @@
+'use client';
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { useRouter } from "next/navigation";
 import { Calendar, MapPin, Users, Plus, MoreHorizontal, Edit3, Trash2, Eye } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 export default function HostDashboard() {
+  const router = useRouter();
   const events = [
     {
       id: 1,
@@ -64,7 +67,7 @@ export default function HostDashboard() {
             <h1 className="text-3xl font-bold mb-2">Your Events</h1>
             <p className="text-zinc-400">Manage and track your hosted events</p>
           </div>
-          <Button className="bg-white text-black hover:bg-zinc-200">
+          <Button onClick={() => router.push("/create-event")} className="bg-white text-black hover:bg-zinc-200">
             <Plus className="h-4 w-4 mr-2" />
             Create Event
           </Button>

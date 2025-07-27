@@ -1,56 +1,162 @@
-"use client"
+"use client";
 
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Slider } from "@/components/ui/slider"
-import { ArrowLeft, MapPin, Plus, X, Calendar, Clock, Users, Target, Sparkles, Save, Send } from "lucide-react"
-import { useState } from "react"
-import dynamic from "next/dynamic"
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
-// Dynamically import the map component to avoid SSR issues
-const LocationMap = dynamic(() => import("@/components/LocationMap"), { ssr: false })
+import dynamic from "next/dynamic";
+import {
+  ArrowLeft,
+  MapPin,
+  Calendar,
+  Clock,
+  Target,
+  Sparkles,
+  Save,
+  Send,
+} from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+
+/* ─────────────  MAP (no‑SSR)  ───────────── */
+const LocationMap = dynamic(() => import("@/components/LocationMap"), { ssr: false });
+
+/* ─────────────  CONSTANTS  ───────────── */
+const API = "http://localhost:8000"; // ← keep absolute URL, matches dashboard
+
+/* ─────────────  TYPES  ───────────── */
+interface Creds {
+  email: string;
+  password: string;
+}
+
+interface LocationRecord {
+  id: string;
+  latitude: number;
+  longitude: number;
+}
 
 export default function CreateEvent() {
-  const [tags, setTags] = useState<string[]>([])
-  const [newTag, setNewTag] = useState("")
-  const [radius, setRadius] = useState([5])
-  const [selectedLocation, setSelectedLocation] = useState<{ lat: number; lng: number; address: string } | null>(null)
-  const [eventName, setEventName] = useState("")
-  const [description, setDescription] = useState("")
-  const [maxAttendees, setMaxAttendees] = useState("")
-  const [isCreating, setIsCreating] = useState(false)
+  const router = useRouter();
 
-  const addTag = () => {
-    if (newTag.trim() && !tags.includes(newTag.trim()) && tags.length < 5) {
-      setTags([...tags, newTag.trim()])
-      setNewTag("")
+  /* ─────────────  GLOBAL / BACKEND STATE  ───────────── */
+  const [creds, setCreds] = useState<Creds | null>(null);
+  const [msg, setMsg] = useState<{ kind: "error" | "success"; text: string } | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
+  const [selectedLocation, setSelectedLocation] = useState<
+    { lat: number; lng: number; address: string } | null
+  >(null);
+
+  const [eventName, setEventName] = useState("");
+  const [description, setDescription] = useState("");
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState("");
+
+  /* ─────────────  CREDENTIAL BOOTSTRAP  ───────────── */
+  useEffect(() => {
+    const raw = localStorage.getItem("netzero_creds");
+    if (!raw) {
+      router.replace("/auth");
+      return;
     }
-  }
+    try {
+      setCreds(JSON.parse(raw));
+    } catch {
+      router.replace("/auth");
+    }
+  }, [router]);
 
-  const removeTag = (tagToRemove: string) => {
-    setTags(tags.filter((tag) => tag !== tagToRemove))
-  }
 
-  const handleLocationSelect = (location: { lat: number; lng: number; address: string }) => {
-    setSelectedLocation(location)
-  }
+  /* ─────────────  LOCATION HANDLER  ───────────── */
+  const handleLocationSelect = (loc: { lat: number; lng: number; address: string }) =>
+    setSelectedLocation(loc);
 
-  const handleCreateEvent = async () => {
-    setIsCreating(true)
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    setIsCreating(false)
-  }
+  /* ─────────────  EVENT CREATION  ───────────── */
+  const handleCreateEvent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!creds) return;
 
-  const isFormValid = eventName.trim() && description.trim() && selectedLocation && maxAttendees
+    setIsCreating(true);
+    setMsg(null);
+
+    try {
+      /* 1️⃣  If user picked a point on the map, create/get a Location row first */
+      let locationId = "";
+      if (selectedLocation) {
+        const locRes = await fetch(`${API}/locations`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Basic ${btoa(`${creds.email}:${creds.password}`)}`,
+          },
+          body: new URLSearchParams({
+            latitude: selectedLocation.lat.toString(),
+            longitude: selectedLocation.lng.toString(),
+          }),
+        });
+        if (!locRes.ok) throw new Error("Failed to create location");
+        const locData: LocationRecord = await locRes.json();
+        locationId = locData.id;
+      } else {
+        throw new Error("Please pick a location");
+      }
+
+      /* 2️⃣  Assemble ISO start_time from date + time inputs */
+      const isoStart = new Date(`${date}T${time}:00`).toISOString();
+
+      /* 3️⃣  Create the event */
+      const evRes = await fetch(`${API}/events`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Basic ${btoa(`${creds.email}:${creds.password}`)}`,
+        },
+        body: new URLSearchParams({
+          name: eventName,
+          start_time: isoStart,
+          duration_minutes: "60", 
+          location_id: locationId,
+          description,
+        }),
+      });
+
+      if (!evRes.ok) {
+        const err = await evRes.json().catch(() => ({}));
+        throw new Error(err.detail || "Event creation failed");
+      }
+
+      setMsg({ kind: "success", text: "Event created successfully!" });
+      setTimeout(() => window.location.href = "/host-dashboard", 800);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      setMsg({ kind: "error", text: err.message || "Unknown error" });
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const isFormValid =
+    eventName.trim() &&
+    description.trim() &&
+    selectedLocation &&
+    date &&
+    time;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-gray-950 to-black text-white relative overflow-hidden">
+      {msg && (
+        <div
+          className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] rounded-lg px-6 py-3 ${
+            msg.kind === "success" ? "bg-green-600" : "bg-red-600"
+          }`}
+        >
+          {msg.text}
+        </div>
+      )}
       {/* Animated background elements */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl animate-pulse"></div>
@@ -59,7 +165,7 @@ export default function CreateEvent() {
       </div>
 
       {/* Header */}
-      <header className="relative border-b border-white/10 backdrop-blur-xl bg-black/20 sticky top-0 z-50">
+      <header className="border-b border-white/10 backdrop-blur-xl bg-black/20 sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button
@@ -169,6 +275,8 @@ export default function CreateEvent() {
                       <Input
                         id="date"
                         type="date"
+                        value={date}
+                        onChange={(e)=>setDate(e.target.value)}
                         className="bg-white/5 border-white/20 text-white pl-12 h-14 focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-all duration-300 hover:border-white/30"
                       />
                     </div>
@@ -177,96 +285,13 @@ export default function CreateEvent() {
                       <Input
                         id="time"
                         type="time"
+                        value={time}
+                        onChange={(e)=>setTime(e.target.value)}
                         className="bg-white/5 border-white/20 text-white pl-12 h-14 focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-all duration-300 hover:border-white/30"
                       />
                     </div>
                   </div>
                 </div>
-
-                {/* Max Attendees */}
-                <div className="space-y-3">
-                  <Label htmlFor="maxAttendees" className="text-lg font-medium flex items-center gap-2 text-white">
-                    <Users className="h-5 w-5" />
-                    Maximum Attendees
-                    <span className="text-red-400">*</span>
-                  </Label>
-                  <Input
-                    id="maxAttendees"
-                    type="number"
-                    value={maxAttendees}
-                    onChange={(e) => setMaxAttendees(e.target.value)}
-                    placeholder="50"
-                    min="1"
-                    max="1000"
-                    className="bg-white/5 border-white/20 text-white placeholder:text-gray-400 h-14 focus:border-blue-400/50 focus:ring-2 focus:ring-blue-400/20 transition-all duration-300 hover:border-white/30"
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Tags */}
-            <Card className="bg-black/20 border-white/10 backdrop-blur-xl shadow-2xl hover:shadow-3xl transition-all duration-500 group">
-              <CardHeader>
-                <CardTitle className="text-2xl flex items-center gap-3 text-white group-hover:text-purple-400 transition-colors duration-300">
-                  <div className="p-2 bg-purple-500/10 rounded-lg border border-purple-500/20">
-                    <Target className="h-6 w-6 text-purple-400" />
-                  </div>
-                  Tags & Categories
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="flex flex-wrap gap-3 min-h-[80px] p-6 bg-white/5 rounded-xl border border-white/10 hover:border-white/20 transition-all duration-300">
-                  {tags.length === 0 ? (
-                    <div className="flex items-center justify-center w-full text-gray-400 text-base">
-                      <Target className="h-5 w-5 mr-2" />
-                      Add tags to help people find your event
-                    </div>
-                  ) : (
-                    tags.map((tag, index) => (
-                      <Badge
-                        key={tag}
-                        className="bg-gradient-to-r from-blue-500 to-purple-600 text-white border-0 px-4 py-2 text-sm font-medium hover:from-blue-600 hover:to-purple-700 transition-all duration-300 transform hover:scale-105 animate-in slide-in-from-bottom-2"
-                        style={{ animationDelay: `${index * 100}ms` }}
-                      >
-                        {tag}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-4 w-4 p-0 ml-2 hover:bg-white/20 text-white"
-                          onClick={() => removeTag(tag)}
-                        >
-                          <X className="h-3 w-3" />
-                        </Button>
-                      </Badge>
-                    ))
-                  )}
-                </div>
-                <div className="flex gap-3">
-                  <div className="flex-1 relative">
-                    <Input
-                      placeholder="e.g. climate-action, tree-planting, sustainability"
-                      value={newTag}
-                      onChange={(e) => setNewTag(e.target.value)}
-                      onKeyPress={(e) => e.key === "Enter" && addTag()}
-                      className="bg-white/5 border-white/20 text-white placeholder:text-gray-400 focus:border-purple-400/50 focus:ring-2 focus:ring-purple-400/20 transition-all duration-300 h-12 hover:border-white/30"
-                      disabled={tags.length >= 5}
-                    />
-                    {tags.length >= 5 && (
-                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-yellow-400">
-                        Max 5 tags
-                      </div>
-                    )}
-                  </div>
-                  <Button
-                    type="button"
-                    onClick={addTag}
-                    disabled={!newTag.trim() || tags.length >= 5}
-                    className="bg-black text-white hover:bg-gray-800 border border-white/20 hover:border-white/30 h-12 px-6 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="text-xs text-gray-400">{tags.length}/5 tags added</div>
               </CardContent>
             </Card>
           </div>
@@ -321,43 +346,6 @@ export default function CreateEvent() {
               </CardContent>
             </Card>
 
-            {/* Radius */}
-            <Card className="bg-black/20 border-white/10 backdrop-blur-xl shadow-2xl hover:shadow-3xl transition-all duration-500 group">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-3 text-white text-xl group-hover:text-orange-400 transition-colors duration-300">
-                  <div className="p-2 bg-orange-500/10 rounded-lg border border-orange-500/20">
-                    <Target className="h-5 w-5 text-orange-400" />
-                  </div>
-                  Event Radius
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-8">
-                <div className="text-center">
-                  <div className="relative inline-block">
-                    <span className="text-5xl font-bold text-white">{radius[0]}</span>
-                    <span className="text-2xl text-gray-400 ml-2">km</span>
-                    <div className="absolute -inset-4 bg-gradient-to-r from-orange-500/20 to-red-500/20 rounded-full blur-xl opacity-50"></div>
-                  </div>
-                  <p className="text-gray-300 mt-2">Coverage area</p>
-                </div>
-
-                <div className="px-2 space-y-4">
-                  <Slider
-                    value={radius}
-                    onValueChange={setRadius}
-                    max={50}
-                    min={1}
-                    step={1}
-                    className="w-full [&_[role=slider]]:bg-gradient-to-r [&_[role=slider]]:from-orange-400 [&_[role=slider]]:to-red-500 [&_[role=slider]]:border-0 [&_[role=slider]]:shadow-lg [&_.slider-track]:bg-white/10 [&_.slider-range]:bg-gradient-to-r [&_.slider-range]:from-orange-400 [&_.slider-range]:to-red-500"
-                  />
-                  <div className="flex justify-between text-sm text-gray-400">
-                    <span>1 km</span>
-                    <span className="text-orange-400 font-medium">{radius[0]} km selected</span>
-                    <span>50 km</span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
           </div>
         </div>
 

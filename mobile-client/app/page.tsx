@@ -1,7 +1,10 @@
+'use client';
 import { Button } from "@/components/ui/button"
 import { ArrowRight, Calendar, MapPin, Users } from "lucide-react"
+import { useRouter } from "next/navigation"
 
 export default function LandingPage() {
+  const router = useRouter()
   return (
     <div className="min-h-screen bg-black text-white">
       {/* Header */}
@@ -29,7 +32,7 @@ export default function LandingPage() {
             networking.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button size="lg" className="bg-white text-black hover:bg-zinc-200 text-lg px-8 py-6">
+            <Button onClick={() => router.push("/create-event")} size="lg" className="bg-white text-black hover:bg-zinc-200 text-lg px-8 py-6">
               Start Creating Events
               <ArrowRight className="ml-2 h-5 w-5" />
             </Button>
